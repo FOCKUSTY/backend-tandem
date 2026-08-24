@@ -1,0 +1,37 @@
+generator client {
+  provider = "prisma-client"
+  output = "./generated"
+  moduleFormat = "cjs"
+  generatedFileExtension = "ts"
+  compilerBuild = "fast"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id       String      @id @default(uuid(7))
+  username String   @unique
+  password String
+  name     String?
+  records  Record[]
+}
+
+model Record {
+  id          String      @id @default(uuid(7))
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  section     String
+  title       String?
+  content     String?
+  dateEvent   DateTime?
+  isCompleted Boolean  @default(false)
+  isPinned    Boolean  @default(false)
+  tags        String[] @default([])
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, section])
+}

@@ -1,0 +1,25 @@
+{
+  "name": "backend-tandem",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "@types/bun": "latest",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.2.0"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.4.2",
+    "fenviee": "^0.1.2",
+    "hono": "^4.13.4",
+    "jsonwebtoken": "^9.0.3",
+    "prisma": "^7.9.1"
+  }
+}
