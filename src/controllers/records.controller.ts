@@ -4,7 +4,23 @@ import prisma from '../prisma/index.js';
 export const getRecords = async (context: Context) => {
   const user = context.get('user');
   const section = context.req.query('section');
-  const where = { userId: user.id, section: section };
+
+  const currentUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { partnerId: true }
+  });
+
+  const userIds = [user.id];
+  if (currentUser?.partnerId) {
+    userIds.push(currentUser.partnerId);
+  }
+
+  const where: any = {
+    userId: { in: userIds }
+  };
+  if (section) {
+    where.section = section;
+  }
 
   const records = await prisma.record.findMany({
     where,
@@ -17,7 +33,20 @@ export const getRecords = async (context: Context) => {
 export const getUpdates = async (context: Context) => {
   const user = context.get('user');
   const since = context.req.query('since');
-  const where: any = { userId: user.id };
+
+  const currentUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { partnerId: true }
+  });
+
+  const userIds = [user.id];
+  if (currentUser?.partnerId) {
+    userIds.push(currentUser.partnerId);
+  }
+
+  const where: any = {
+    userId: { in: userIds }
+  };
   if (since) {
     where.updatedAt = { gt: new Date(since) };
   }
@@ -48,7 +77,7 @@ export const createRecord = async (context: Context) => {
 
 export const updateRecord = async (context: Context) => {
   const user = context.get('user');
-  const id = parseInt(context.req.param('id')!);
+  const id = context.req.param('id')!;
   const { title, content, dateEvent, isCompleted, tags, metadata } = await context.req.json();
 
   const existing = await prisma.record.findUnique({ where: { id } });
@@ -73,7 +102,7 @@ export const updateRecord = async (context: Context) => {
 
 export const deleteRecord = async (context: Context) => {
   const user = context.get('user');
-  const id = parseInt(context.req.param('id')!);
+  const id = context.req.param('id')!;
 
   const existing = await prisma.record.findUnique({ where: { id } });
   if (!existing || existing.userId !== user.id) {

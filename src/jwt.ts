@@ -5,13 +5,13 @@ import {
   verify as jwtVerify
 } from 'jsonwebtoken';
 
-export const sign = (payload: { id: number; username: string }) => {
+export const sign = (payload: { id: string; username: string }) => {
   return jwtSign(payload, env.JWT_SECRET, { expiresIn: '30d' });
 };
 
 export const verify = (token: string) => {
   try {
-    return jwtVerify(token, env.JWT_SECRET) as { id: number; username: string };
+    return jwtVerify(token, env.JWT_SECRET) as { id: string; username: string };
   } catch {
     return null;
   }

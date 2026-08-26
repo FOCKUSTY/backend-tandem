@@ -1,9 +1,9 @@
 generator client {
-  provider = "prisma-client"
-  output = "./generated"
-  moduleFormat = "cjs"
+  provider               = "prisma-client"
+  output                 = "./generated"
+  moduleFormat           = "cjs"
   generatedFileExtension = "ts"
-  compilerBuild = "fast"
+  compilerBuild          = "fast"
 }
 
 datasource db {
@@ -11,27 +11,34 @@ datasource db {
 }
 
 model User {
-  id       String      @id @default(uuid(7))
+  id       String   @id @default(uuid(7))
   username String   @unique
   password String
   name     String?
   records  Record[]
+
+  partnerId String? @unique
+  partner   User?   @relation("UserPartner", fields: [partnerId], references: [id])
+
+  linkedUsers User[] @relation("UserPartner")
 }
 
 model Record {
-  id          String      @id @default(uuid(7))
+  id          String    @id @default(uuid(7))
   userId      String
-  user        User     @relation(fields: [userId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
   section     String
   title       String?
   content     String?
   dateEvent   DateTime?
-  isCompleted Boolean  @default(false)
-  isPinned    Boolean  @default(false)
-  tags        String[] @default([])
-  metadata    Json     @default("{}")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isCompleted Boolean   @default(false)
+  isPinned    Boolean   @default(false)
+  tags        String[]  @default([])
+  metadata    Json      @default("{}")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([userId, section])
+  @@index([userId, section, dateEvent])
+  @@index([userId, updatedAt])
 }
