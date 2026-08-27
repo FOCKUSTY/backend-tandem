@@ -1,19 +1,21 @@
-import { Hono } from 'hono';
-import { authMiddleware } from '../middlewares/auth.middleware.js';
+import { Hono } from "hono";
+import { authMiddleware } from "../middlewares/auth.middleware.js";
 import {
   getRecords,
   getUpdates,
   createRecord,
   updateRecord,
-  deleteRecord
-} from '../controllers/records.controller.js';
+  deleteRecord,
+  getRecordById,
+} from "../controllers/records.controller.js";
 
 const records = new Hono();
-records.use('*', authMiddleware);
-records.get('/', getRecords);
-records.get('/updates', getUpdates);
-records.post('/', createRecord);
-records.patch('/:id', updateRecord);
-records.delete('/:id', deleteRecord);
+records.use("*", authMiddleware);
+records.get("/", getRecords);
+records.get("/updates", getUpdates);
+records.post("/", createRecord);
+records.get("/:id", getRecordById);
+records.patch("/:id", updateRecord);
+records.delete("/:id", deleteRecord);
 
 export default records;
