@@ -17,38 +17,50 @@ model User {
   name     String?
   records  Record[]
 
-  partnerId String? @unique
-  partner   User?   @relation("UserPartner", fields: [partnerId], references: [id])
+  pairId   String?
+  pair     Pair?    @relation("PairUsers", fields: [pairId], references: [id])
 
-  linkedUsers User[] @relation("UserPartner")
+  pairsA Pair[] @relation("PairUsersA")
+  pairsB Pair[] @relation("PairUsersB")
+}
 
-  sections Section[]
+model Pair {
+  id        String   @id @default(uuid(7))
+  userAId   String
+  userBId   String
+  userA     User     @relation("PairUsersA", fields: [userAId], references: [id])
+  userB     User     @relation("PairUsersB", fields: [userBId], references: [id])
+  users     User[]   @relation("PairUsers")
+
+  sections  Section[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userAId, userBId])
 }
 
 model Section {
-  id          String   @id @default(uuid(7))
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  name        String
-  slug        String
-  isSystem    Boolean  @default(false)
-  order       Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid(7))
+  pairId    String
+  pair      Pair     @relation(fields: [pairId], references: [id])
+  name      String
+  slug      String
+  isSystem  Boolean  @default(false)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  records     Record[]
+  records   Record[]
 
-  @@unique([userId, slug])
+  @@unique([pairId, slug])
 }
 
 model Record {
   id          String    @id @default(uuid(7))
   userId      String
   user        User      @relation(fields: [userId], references: [id])
-
   sectionId   String
-  section     Section @relation(fields: [sectionId], references: [id])
-
+  section     Section   @relation(fields: [sectionId], references: [id])
   title       String?
   content     String?
   dateEvent   DateTime?

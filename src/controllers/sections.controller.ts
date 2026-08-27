@@ -1,11 +1,21 @@
 import { Context } from "hono";
 import prisma from "../prisma/index.js";
 
+async function getPairId(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { pairId: true },
+  });
+  return user?.pairId ?? null;
+}
+
 export const getSections = async (context: Context) => {
   const user = context.get("user");
+  const pairId = await getPairId(user.id);
+  if (!pairId) return context.json([]);
 
   const sections = await prisma.section.findMany({
-    where: { userId: user.id },
+    where: { pairId },
     orderBy: { order: "asc" },
     select: {
       id: true,
@@ -13,12 +23,9 @@ export const getSections = async (context: Context) => {
       slug: true,
       isSystem: true,
       order: true,
-      _count: {
-        select: { records: true },
-      },
+      _count: { select: { records: true } },
     },
   });
-
   return context.json(sections);
 };
 
@@ -28,6 +35,11 @@ export const createSection = async (context: Context) => {
 
   if (!name || name.trim().length === 0) {
     return context.json({ message: "Название секции обязательно" }, 400);
+  }
+
+  const pairId = await getPairId(user.id);
+  if (!pairId) {
+    return context.json({ message: "У вас нет пары" }, 400);
   }
 
   let finalSlug = slug;
@@ -41,14 +53,8 @@ export const createSection = async (context: Context) => {
   }
 
   const existing = await prisma.section.findUnique({
-    where: {
-      userId_slug: {
-        userId: user.id,
-        slug: finalSlug,
-      },
-    },
+    where: { pairId_slug: { pairId, slug: finalSlug } },
   });
-
   if (existing) {
     return context.json(
       { message: "Секция с таким идентификатором уже существует" },
@@ -59,7 +65,7 @@ export const createSection = async (context: Context) => {
   let finalOrder = order;
   if (finalOrder === undefined) {
     const maxOrder = await prisma.section.aggregate({
-      where: { userId: user.id },
+      where: { pairId },
       _max: { order: true },
     });
     finalOrder = (maxOrder._max.order ?? -1) + 1;
@@ -67,14 +73,13 @@ export const createSection = async (context: Context) => {
 
   const section = await prisma.section.create({
     data: {
-      userId: user.id,
+      pairId,
       name: name.trim(),
       slug: finalSlug,
       isSystem: false,
       order: finalOrder,
     },
   });
-
   return context.json(section, 201);
 };
 
@@ -83,11 +88,11 @@ export const updateSection = async (context: Context) => {
   const id = context.req.param("id");
   const { name, order } = await context.req.json();
 
-  const section = await prisma.section.findUnique({
-    where: { id },
-  });
+  const pairId = await getPairId(user.id);
+  if (!pairId) return context.json({ message: "У вас нет пары" }, 400);
 
-  if (!section || section.userId !== user.id) {
+  const section = await prisma.section.findUnique({ where: { id } });
+  if (!section || section.pairId !== pairId) {
     return context.json({ message: "Секция не найдена" }, 404);
   }
 
@@ -106,7 +111,6 @@ export const updateSection = async (context: Context) => {
     where: { id },
     data: updateData,
   });
-
   return context.json(updated);
 };
 
@@ -114,26 +118,26 @@ export const deleteSection = async (context: Context) => {
   const user = context.get("user");
   const id = context.req.param("id");
 
+  const pairId = await getPairId(user.id);
+  if (!pairId) return context.json({ message: "У вас нет пары" }, 400);
+
   const section = await prisma.section.findUnique({
     where: { id },
-    include: {
-      _count: {
-        select: { records: true },
-      },
-    },
+    include: { _count: { select: { records: true } } },
   });
-
-  if (!section || section.userId !== user.id) {
+  if (!section || section.pairId !== pairId) {
     return context.json({ message: "Секция не найдена" }, 404);
   }
-
   if (section.isSystem) {
     return context.json({ message: "Системные секции нельзя удалять" }, 403);
   }
+  if (section._count.records > 0) {
+    return context.json(
+      { message: "Невозможно удалить секцию, так как в ней есть записи" },
+      400,
+    );
+  }
 
-  await prisma.section.delete({
-    where: { id },
-  });
-
+  await prisma.section.delete({ where: { id } });
   return context.json({ message: "Секция удалена" });
 };

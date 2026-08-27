@@ -10,23 +10,16 @@ export const SYSTEM_SECTIONS = [
   { name: "Связь", slug: "contacts", order: 4 },
 ];
 
-async function ensureSystemSections(userId: string) {
+async function ensureSystemSections(pairId: string) {
   const existing = await prisma.section.findMany({
-    where: {
-      userId,
-      isSystem: true,
-    },
+    where: { pairId, isSystem: true },
   });
-
   const existingSlugs = new Set(existing.map((s) => s.slug));
-
   const toCreate = SYSTEM_SECTIONS.filter((s) => !existingSlugs.has(s.slug));
-
   if (toCreate.length === 0) return;
-
   await prisma.section.createMany({
     data: toCreate.map((s) => ({
-      userId,
+      pairId,
       name: s.name,
       slug: s.slug,
       isSystem: true,
@@ -37,18 +30,14 @@ async function ensureSystemSections(userId: string) {
 
 export const login = async (context: Context) => {
   const { username, password } = await context.req.json();
-
   const user = await prisma.user.findUnique({ where: { username } });
-  if (!user) {
-    return context.json({ message: "Invalid credentials" }, 401);
-  }
-
+  if (!user) return context.json({ message: "Invalid credentials" }, 401);
   const valid = await bcrypt.compare(password, user.password);
-  if (!valid) {
-    return context.json({ message: "Invalid credentials" }, 401);
-  }
+  if (!valid) return context.json({ message: "Invalid credentials" }, 401);
 
-  await ensureSystemSections(user.id);
+  if (user.pairId) {
+    await ensureSystemSections(user.pairId);
+  }
 
   const token = sign({ id: user.id, username: user.username });
   return context.json({
