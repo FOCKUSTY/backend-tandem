@@ -8,8 +8,6 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 
-ENV DATABASE_URL="postgres://"
-
 RUN bunx prisma generate
 
 FROM oven/bun:latest
