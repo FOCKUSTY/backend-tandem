@@ -173,7 +173,11 @@ export const updateRecord = async (context: Context) => {
     where: { id },
     include: { section: true },
   });
-  if (!existing || existing.userId !== user.id) {
+  if (!existing) {
+    return context.json({ message: "Not found" }, 404);
+  }
+  const userIdsInPair = await getUserIdsInPair(existing.userId);
+  if (!userIdsInPair.includes(user.id)) {
     return context.json({ message: "Not found" }, 404);
   }
 
@@ -209,7 +213,11 @@ export const deleteRecord = async (context: Context) => {
   const user = context.get("user");
   const id = context.req.param("id")!;
   const existing = await prisma.record.findUnique({ where: { id } });
-  if (!existing || existing.userId !== user.id) {
+  if (!existing) {
+    return context.json({ message: "Not found" }, 404);
+  }
+  const userIdsInPair = await getUserIdsInPair(existing.userId);
+  if (!userIdsInPair.includes(user.id)) {
     return context.json({ message: "Not found" }, 404);
   }
   await prisma.record.delete({ where: { id } });
