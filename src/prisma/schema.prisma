@@ -23,16 +23,24 @@ model User {
   pairsA Pair[] @relation("PairUsersA")
   pairsB Pair[] @relation("PairUsersB")
 
-  pushTokens PushToken[]
+  devices Device[]
 }
 
-model PushToken {
-  id        String   @id @default(uuid(7))
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  token     String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model Device {
+  id          String   @id @default(uuid(7))
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  deviceId    String   @unique
+  platform    String?
+  osVersion   String?
+  appVersion  String?
+  model       String?
+  pushToken   String?  @unique
+  lastActiveAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, deviceId]) // дополнительная гарантия
 }
 
 model Pair {
