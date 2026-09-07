@@ -1,5 +1,6 @@
 import { Context } from "hono";
 import prisma from "../prisma/index.js";
+import { getNextRecurringDate, validateInterval } from "../utils/recurring.js";
 
 async function getPairId(userId: string): Promise<string | null> {
   const user = await prisma.user.findUnique({
@@ -25,6 +26,18 @@ async function getUserIdsInPair(userId: string): Promise<string[]> {
   return [user.pair.userAId, user.pair.userBId];
 }
 
+function processRecurringRecords(records: any[]): any[] {
+  return records.map((record) => {
+    if (record.isRecurring && record.recurringInterval && record.dateEvent) {
+      record.dateEvent = getNextRecurringDate(
+        record.dateEvent,
+        record.recurringInterval,
+      );
+    }
+    return record;
+  });
+}
+
 export const getRecordById = async (context: Context) => {
   const user = context.get("user");
   const id = context.req.param("id")!;
@@ -38,7 +51,8 @@ export const getRecordById = async (context: Context) => {
   if (!userIds.includes(record.userId)) {
     return context.json({ message: "Доступ запрещён" }, 403);
   }
-  return context.json(record);
+  const processed = processRecurringRecords([record]);
+  return context.json(processed[0]);
 };
 
 export const getRecords = async (context: Context) => {
@@ -97,7 +111,9 @@ export const getRecords = async (context: Context) => {
     skip,
     include: { section: { select: { id: true, name: true, slug: true } } },
   });
-  return context.json(records);
+
+  const processed = processRecurringRecords(records);
+  return context.json(processed);
 };
 
 export const getUpdates = async (context: Context) => {
@@ -110,7 +126,8 @@ export const getUpdates = async (context: Context) => {
     where,
     include: { section: { select: { id: true, name: true, slug: true } } },
   });
-  return context.json(records);
+  const processed = processRecurringRecords(records);
+  return context.json(processed);
 };
 
 export const createRecord = async (context: Context) => {
@@ -124,7 +141,15 @@ export const createRecord = async (context: Context) => {
     isCompleted,
     tags,
     metadata,
+    isRecurring,
+    recurringInterval,
   } = await context.req.json();
+
+  if (isRecurring && recurringInterval) {
+    if (!validateInterval(recurringInterval)) {
+      return context.json({ message: "Некорректный интервал повторения" }, 400);
+    }
+  }
 
   const pairId = await getPairId(user.id);
   if (!pairId) return context.json({ message: "У вас нет пары" }, 400);
@@ -157,6 +182,8 @@ export const createRecord = async (context: Context) => {
       isCompleted: isCompleted || false,
       tags: tags || [],
       metadata: metadata || {},
+      isRecurring: isRecurring || false,
+      recurringInterval: isRecurring ? recurringInterval : null,
     },
     include: { section: { select: { id: true, name: true, slug: true } } },
   });
@@ -166,8 +193,23 @@ export const createRecord = async (context: Context) => {
 export const updateRecord = async (context: Context) => {
   const user = context.get("user");
   const id = context.req.param("id")!;
-  const { title, content, dateEvent, isCompleted, tags, metadata, sectionId } =
-    await context.req.json();
+  const {
+    title,
+    content,
+    dateEvent,
+    isCompleted,
+    tags,
+    metadata,
+    sectionId,
+    isRecurring,
+    recurringInterval,
+  } = await context.req.json();
+
+  if (isRecurring && recurringInterval) {
+    if (!validateInterval(recurringInterval)) {
+      return context.json({ message: "Некорректный интервал повторения" }, 400);
+    }
+  }
 
   const existing = await prisma.record.findUnique({
     where: { id },
@@ -203,6 +245,9 @@ export const updateRecord = async (context: Context) => {
       tags,
       metadata,
       sectionId: finalSectionId,
+      isRecurring:
+        isRecurring !== undefined ? isRecurring : existing.isRecurring,
+      recurringInterval: isRecurring ? recurringInterval : null,
     },
     include: { section: { select: { id: true, name: true, slug: true } } },
   });

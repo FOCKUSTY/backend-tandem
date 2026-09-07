@@ -40,7 +40,7 @@ model Device {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@unique([userId, deviceId]) // дополнительная гарантия
+  @@unique([userId, deviceId])
 }
 
 model Pair {
@@ -89,8 +89,12 @@ model Record {
   metadata    Json      @default("{}")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+  isRecurring       Boolean   @default(false)
+  recurringInterval String?
 
   @@index([userId, sectionId])
   @@index([userId, sectionId, dateEvent])
+  @@index([userId, dateEvent])
   @@index([userId, updatedAt])
+  @@index([userId, isRecurring])
 }

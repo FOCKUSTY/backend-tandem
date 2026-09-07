@@ -21,6 +21,7 @@
     "fenviee": "^0.1.2",
     "hono": "^4.13.4",
     "jsonwebtoken": "^9.0.3",
-    "prisma": "^7.9.1"
+    "prisma": "^7.9.1",
+    "rrule": "^2.8.1"
   }
 }
