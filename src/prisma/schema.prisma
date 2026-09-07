@@ -24,6 +24,7 @@ model User {
   pairsB Pair[] @relation("PairUsersB")
 
   devices Device[]
+  favoritesRecords UserFavoritesRecord[]
 }
 
 model Device {
@@ -92,9 +93,20 @@ model Record {
   isRecurring       Boolean   @default(false)
   recurringInterval String?
 
+  favoriteBy UserFavoritesRecord[]
+
   @@index([userId, sectionId])
   @@index([userId, sectionId, dateEvent])
   @@index([userId, dateEvent])
   @@index([userId, updatedAt])
   @@index([userId, isRecurring])
+}
+
+model UserFavoritesRecord {
+  userId   String
+  recordId String
+  user     User   @relation(fields: [userId], references: [id])
+  record   Record @relation(fields: [recordId], references: [id])
+
+  @@id([userId, recordId])
 }

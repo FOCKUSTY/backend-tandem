@@ -51,8 +51,19 @@ export const getRecordById = async (context: Context) => {
   if (!userIds.includes(record.userId)) {
     return context.json({ message: "Доступ запрещён" }, 403);
   }
+
+  const favorite = await prisma.userFavoritesRecord.findUnique({
+    where: {
+      userId_recordId: {
+        userId: user.id,
+        recordId: record.id,
+      },
+    },
+  });
+  const isStarred = !!favorite;
+
   const processed = processRecurringRecords([record]);
-  return context.json(processed[0]);
+  return context.json({ ...processed[0], isStarred });
 };
 
 export const getRecords = async (context: Context) => {
@@ -70,6 +81,14 @@ export const getRecords = async (context: Context) => {
     limit,
     offset,
   } = context.req.query();
+
+  const starredRecords = await prisma.userFavoritesRecord.findMany({
+    where: { userId: user.id },
+    select: { recordId: true },
+  });
+  const starredIds = new Set(
+    starredRecords.map((favorite) => favorite.recordId),
+  );
 
   const userIds = await getUserIdsInPair(user.id);
   const where: any = { userId: { in: userIds } };
@@ -112,7 +131,12 @@ export const getRecords = async (context: Context) => {
     include: { section: { select: { id: true, name: true, slug: true } } },
   });
 
-  const processed = processRecurringRecords(records);
+  const recordsWithFavorite = records.map((record) => ({
+    ...record,
+    isStarred: starredIds.has(record.id),
+  }));
+
+  const processed = processRecurringRecords(recordsWithFavorite);
   return context.json(processed);
 };
 
@@ -265,6 +289,11 @@ export const deleteRecord = async (context: Context) => {
   if (!userIdsInPair.includes(user.id)) {
     return context.json({ message: "Not found" }, 404);
   }
+
+  await prisma.userFavoritesRecord.deleteMany({
+    where: { recordId: id },
+  });
+
   await prisma.record.delete({ where: { id } });
   return context.json({ message: "Deleted" });
 };
