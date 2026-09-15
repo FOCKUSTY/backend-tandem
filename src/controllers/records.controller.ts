@@ -79,6 +79,7 @@ export const getRecords = async (context: Context) => {
     sortBy = "dateEvent",
     sortOrder = "asc",
     limit,
+    isReport,
     offset,
   } = context.req.query();
 
@@ -98,6 +99,7 @@ export const getRecords = async (context: Context) => {
     if (ids.length) where.sectionId = { in: ids };
   }
   if (isCompleted !== undefined) where.isCompleted = isCompleted === "true";
+  if (isReport !== undefined) where.isReport = isReport === "true";
   if (isPinned !== undefined) where.isPinned = isPinned === "true";
   if (dateFrom)
     where.dateEvent = { ...where.dateEvent, gte: new Date(dateFrom) };
@@ -167,6 +169,7 @@ export const createRecord = async (context: Context) => {
     metadata,
     isRecurring,
     recurringInterval,
+    isReport,
   } = await context.req.json();
 
   if (isRecurring && recurringInterval) {
@@ -208,6 +211,7 @@ export const createRecord = async (context: Context) => {
       metadata: metadata || {},
       isRecurring: isRecurring || false,
       recurringInterval: isRecurring ? recurringInterval : null,
+      isReport: isReport || false,
     },
     include: { section: { select: { id: true, name: true, slug: true } } },
   });
@@ -227,6 +231,7 @@ export const updateRecord = async (context: Context) => {
     sectionId,
     isRecurring,
     recurringInterval,
+    isReport,
   } = await context.req.json();
 
   if (isRecurring && recurringInterval) {
@@ -272,6 +277,7 @@ export const updateRecord = async (context: Context) => {
       isRecurring:
         isRecurring !== undefined ? isRecurring : existing.isRecurring,
       recurringInterval: isRecurring ? recurringInterval : null,
+      isReport: isReport !== undefined ? isReport : existing.isReport,
     },
     include: { section: { select: { id: true, name: true, slug: true } } },
   });

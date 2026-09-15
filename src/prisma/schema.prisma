@@ -92,6 +92,7 @@ model Record {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   isRecurring       Boolean   @default(false)
+  isReport          Boolean   @default(false)
   recurringInterval String?
 
   favoriteBy UserFavoritesRecord[]
@@ -101,6 +102,7 @@ model Record {
   @@index([userId, dateEvent])
   @@index([userId, updatedAt])
   @@index([userId, isRecurring])
+  @@index([userId, isReport])
 }
 
 model UserFavoritesRecord {
