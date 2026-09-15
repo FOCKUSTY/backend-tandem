@@ -11,50 +11,51 @@ datasource db {
 }
 
 model User {
-  id       String   @id @default(uuid(7))
-  username String   @unique
-  password String
-  name     String?
-  records  Record[]
+  id           String        @id @default(uuid(7))
+  username     String        @unique
+  password     String
+  name         String?
+  records      Record[]
 
-  pairId   String?
-  pair     Pair?    @relation("PairUsers", fields: [pairId], references: [id])
+  pairId String?
+  pair   Pair?   @relation("PairUsers", fields: [pairId], references: [id])
 
   pairsA Pair[] @relation("PairUsersA")
   pairsB Pair[] @relation("PairUsersB")
 
-  devices Device[]
+  devices          Device[]
   favoritesRecords UserFavoritesRecord[]
 }
 
 model Device {
-  id          String   @id @default(uuid(7))
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  deviceId    String   @unique
-  platform    String?
-  osVersion   String?
-  appVersion  String?
-  model       String?
-  pushToken   String?  @unique
+  id           String   @id @default(uuid(7))
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  deviceId     String   @unique
+  platform     String?
+  osVersion    String?
+  appVersion   String?
+  model        String?
+  pushToken    String?  @unique
   lastActiveAt DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@unique([userId, deviceId])
 }
 
 model Pair {
-  id        String   @id @default(uuid(7))
-  userAId   String
-  userBId   String
-  userA     User     @relation("PairUsersA", fields: [userAId], references: [id])
-  userB     User     @relation("PairUsersB", fields: [userBId], references: [id])
-  users     User[]   @relation("PairUsers")
+  id      String @id @default(uuid(7))
+  userAId String
+  userBId String
+  userA   User   @relation("PairUsersA", fields: [userAId], references: [id])
+  userB   User   @relation("PairUsersB", fields: [userBId], references: [id])
+  users   User[] @relation("PairUsers")
 
-  sections  Section[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  sections      Section[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  tableSections TableSection[]
 
   @@unique([userAId, userBId])
 }
@@ -70,26 +71,26 @@ model Section {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  records   Record[]
+  records Record[]
 
   @@unique([pairId, slug])
 }
 
 model Record {
-  id          String    @id @default(uuid(7))
-  userId      String
-  user        User      @relation(fields: [userId], references: [id])
-  sectionId   String
-  section     Section   @relation(fields: [sectionId], references: [id])
-  title       String?
-  content     String?
-  dateEvent   DateTime?
-  isCompleted Boolean   @default(false)
-  isPinned    Boolean   @default(false)
-  tags        String[]  @default([])
-  metadata    Json      @default("{}")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                String    @id @default(uuid(7))
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  sectionId         String
+  section           Section   @relation(fields: [sectionId], references: [id])
+  title             String?
+  content           String?
+  dateEvent         DateTime?
+  isCompleted       Boolean   @default(false)
+  isPinned          Boolean   @default(false)
+  tags              String[]  @default([])
+  metadata          Json      @default("{}")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
   isRecurring       Boolean   @default(false)
   recurringInterval String?
 
@@ -109,4 +110,99 @@ model UserFavoritesRecord {
   record   Record @relation(fields: [recordId], references: [id])
 
   @@id([userId, recordId])
+}
+
+model TableSection {
+  id        String   @id @default(uuid(7))
+  
+  pairId    String
+  pair      Pair     @relation(fields: [pairId], references: [id])
+  
+  name      String
+  slug      String
+  order     Int      @default(0)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tables    Table[]
+
+  @@unique([pairId, slug])
+  @@unique([pairId, order])
+}
+
+model Table {
+  id          String   @id @default(uuid(7))
+  
+  sectionId   String
+  section     TableSection @relation(fields: [sectionId], references: [id])
+  
+  name        String
+  description String?
+  order       Int      @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  fields      Field[]
+  rows        Row[]
+
+  @@unique([sectionId, order])
+}
+
+model Field {
+  id           String   @id @default(uuid(7))
+  
+  tableId      String
+  table        Table    @relation(fields: [tableId], references: [id])
+  
+  name         String
+  type         String
+  required     Boolean  @default(false)
+  
+  options      String[] @default([])
+  defaultValue String?
+  order        Int      @default(0)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cells        Cell[]
+
+  @@unique([tableId, name])
+  @@unique([tableId, order])
+}
+
+model Row {
+  id        String   @id @default(uuid(7))
+  
+  tableId   String
+  table     Table    @relation(fields: [tableId], references: [id])
+  
+  order     Int      @default(0)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cells     Cell[]
+
+  @@unique([tableId, order])
+}
+
+model Cell {
+  id        String   @id @default(uuid(7))
+  
+  rowId     String
+  row       Row      @relation(fields: [rowId], references: [id])
+  
+  fieldId   String
+  field     Field    @relation(fields: [fieldId], references: [id])
+  
+  value     String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([rowId, fieldId])
+  @@index([fieldId])
 }

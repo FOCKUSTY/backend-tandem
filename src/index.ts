@@ -6,6 +6,7 @@ import recordsRoutes from "./routes/records.js";
 import usersRoutes from "./routes/users.js";
 import sectionsRoutes from "./routes/sections.js";
 import pushRoutes from "./routes/push.js";
+import tablesRoutes from "./routes/tables.js";
 
 const app = new Hono();
 
@@ -23,6 +24,8 @@ app.route("/api/records", recordsRoutes);
 app.route("/api/users", usersRoutes);
 app.route("/api/sections", sectionsRoutes);
 app.route("/api/push", pushRoutes);
+app.route("/api/tables", tablesRoutes);
+
 app.get("/health", (c) => c.json({ status: "ok" }));
 
 console.log(
