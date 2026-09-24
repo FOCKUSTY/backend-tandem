@@ -28,6 +28,73 @@ async function ensureSystemSections(pairId: string) {
   });
 }
 
+const USERNAME_REGEX = /^[a-zA-Z0-9_.-]+$/;
+
+export const register = async (context: Context) => {
+  const body = await context.req.json().catch(() => ({}));
+  const { username, password, name } = body ?? {};
+
+  if (!username || typeof username !== "string") {
+    return context.json({ message: "Укажите имя пользователя" }, 400);
+  }
+  const trimmedUsername = username.trim();
+  if (
+    trimmedUsername.length < 3 ||
+    trimmedUsername.length > 32 ||
+    !USERNAME_REGEX.test(trimmedUsername)
+  ) {
+    return context.json(
+      {
+        message:
+          "Username должен содержать от 3 до 32 символов: латиница, цифры, _ . -",
+      },
+      400,
+    );
+  }
+
+  if (!name || typeof name !== "string") {
+    return context.json({ message: "Укажите ваше имя" }, 400);
+  }
+  const trimmedName = name.trim();
+  if (trimmedName.length < 1 || trimmedName.length > 64) {
+    return context.json(
+      { message: "Имя должно содержать от 1 до 64 символов" },
+      400,
+    );
+  }
+
+  if (!password || typeof password !== "string") {
+    return context.json({ message: "Укажите пароль" }, 400);
+  }
+  if (password.length < 6 || password.length > 128) {
+    return context.json(
+      { message: "Пароль должен содержать от 6 до 128 символов" },
+      400,
+    );
+  }
+
+  const existing = await prisma.user.findUnique({
+    where: { username: trimmedUsername },
+    select: { id: true },
+  });
+  if (existing) {
+    return context.json({ message: "Такое имя пользователя уже занято" }, 409);
+  }
+
+  const hash = await bcrypt.hash(password, 10);
+  const user = await prisma.user.create({
+    data: {
+      username: trimmedUsername,
+      name: trimmedName,
+      password: hash,
+    },
+    select: { id: true, username: true, name: true },
+  });
+
+  const token = sign({ id: user.id, username: user.username });
+  return context.json({ token, user }, 201);
+};
+
 export const login = async (context: Context) => {
   const { username, password } = await context.req.json();
   const user = await prisma.user.findUnique({ where: { username } });
