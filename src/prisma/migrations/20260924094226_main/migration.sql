@@ -66,6 +66,7 @@ CREATE TABLE "Record" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "isRecurring" BOOLEAN NOT NULL DEFAULT false,
+    "isReport" BOOLEAN NOT NULL DEFAULT false,
     "recurringInterval" TEXT,
 
     CONSTRAINT "Record_pkey" PRIMARY KEY ("id")
@@ -176,6 +177,9 @@ CREATE INDEX "Record_userId_updatedAt_idx" ON "Record"("userId", "updatedAt");
 
 -- CreateIndex
 CREATE INDEX "Record_userId_isRecurring_idx" ON "Record"("userId", "isRecurring");
+
+-- CreateIndex
+CREATE INDEX "Record_userId_isReport_idx" ON "Record"("userId", "isReport");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "TableSection_pairId_slug_key" ON "TableSection"("pairId", "slug");
