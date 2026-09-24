@@ -25,6 +25,30 @@ async function getUserIdsInPair(userId: string): Promise<string[]> {
   return [user.pair.userAId, user.pair.userBId];
 }
 
+/**
+ * Безопасно переставляет order для набора записей.
+ * Unique constraint на (parentId, order) не даёт обновлять "в лоб",
+ * поэтому сначала уводим все в отрицательную область, затем финальные значения.
+ */
+async function applyOrder(
+  tx: any,
+  model: {
+    update: (args: { where: { id: string }; data: { order: number } }) => any;
+  },
+  ids: string[],
+): Promise<void> {
+  await Promise.all(
+    ids.map((id, index) =>
+      model.update({ where: { id }, data: { order: -(index + 1) } }),
+    ),
+  );
+  await Promise.all(
+    ids.map((id, index) =>
+      model.update({ where: { id }, data: { order: index } }),
+    ),
+  );
+}
+
 export const getTableSections = async (context: Context) => {
   const user = context.get("user");
   const pairId = await getPairId(user.id);
@@ -184,7 +208,7 @@ export const deleteTableSection = async (context: Context) => {
 
 export const reorderTableSections = async (context: Context) => {
   const user = context.get("user");
-  const { ids } = await context.req.json(); // массив id в новом порядке
+  const { ids } = await context.req.json();
 
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
     return context.json({ message: "Неверный формат" }, 400);
@@ -200,14 +224,7 @@ export const reorderTableSections = async (context: Context) => {
     return context.json({ message: "Некоторые секции не найдены" }, 404);
   }
 
-  await prisma.$transaction(
-    ids.map((id, index) =>
-      prisma.tableSection.update({
-        where: { id },
-        data: { order: index },
-      }),
-    ),
-  );
+  await prisma.$transaction((tx) => applyOrder(tx, tx.tableSection, ids));
 
   return context.json({ success: true });
 };
@@ -225,6 +242,7 @@ export const getTables = async (context: Context) => {
       _count: { select: { rows: true, fields: true } },
     },
   });
+
   return context.json(tables);
 };
 
@@ -418,14 +436,7 @@ export const reorderTables = async (context: Context) => {
     return context.json({ message: "Некоторые таблицы не найдены" }, 404);
   }
 
-  await prisma.$transaction(
-    ids.map((id, index) =>
-      prisma.table.update({
-        where: { id },
-        data: { order: index },
-      }),
-    ),
-  );
+  await prisma.$transaction((tx) => applyOrder(tx, tx.table, ids));
 
   return context.json({ success: true });
 };
@@ -613,14 +624,7 @@ export const reorderFields = async (context: Context) => {
     return context.json({ message: "Некоторые поля не найдены" }, 404);
   }
 
-  await prisma.$transaction(
-    ids.map((id, index) =>
-      prisma.field.update({
-        where: { id },
-        data: { order: index },
-      }),
-    ),
-  );
+  await prisma.$transaction((tx) => applyOrder(tx, tx.field, ids));
 
   return context.json({ success: true });
 };
@@ -709,19 +713,14 @@ export const reorderRows = async (context: Context) => {
     return context.json({ message: "Некоторые строки не найдены" }, 404);
   }
 
-  await prisma.$transaction(
-    ids.map((id, index) =>
-      prisma.row.update({
-        where: { id },
-        data: { order: index },
-      }),
-    ),
-  );
+  await prisma.$transaction((tx) => applyOrder(tx, tx.field, ids));
 
   return context.json({ success: true });
 };
 
 function validateCellValue(value: string, field: any): boolean {
+  if (value === "" || value === null || value === undefined) return true;
+
   switch (field.type) {
     case "text":
     case "multiline":

@@ -112,7 +112,7 @@ export const getRecords = async (context: Context) => {
   }
   if (tags) {
     const tagList = tags.split(",").filter(Boolean);
-    if (tagList.length) where.tags = { hasEvery: tagList };
+    if (tagList.length) where.tags = { hasSome: tagList };
   }
 
   const orderBy: any = {};
@@ -269,14 +269,14 @@ export const updateRecord = async (context: Context) => {
     data: {
       title,
       content,
-      dateEvent: dateEvent ? new Date(dateEvent) : null,
+      dateEvent: dateEvent ? new Date(dateEvent) : undefined,
       isCompleted,
       tags,
       metadata,
       sectionId: finalSectionId,
       isRecurring:
         isRecurring !== undefined ? isRecurring : existing.isRecurring,
-      recurringInterval: isRecurring ? recurringInterval : null,
+      recurringInterval: isRecurring ? recurringInterval : undefined,
       isReport: isReport !== undefined ? isReport : existing.isReport,
     },
     include: { section: { select: { id: true, name: true, slug: true } } },

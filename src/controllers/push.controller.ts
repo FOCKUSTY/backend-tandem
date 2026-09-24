@@ -100,7 +100,7 @@ export const getDevice = async (context: Context) => {
         belongsToCurrentUser: false,
         message: "Device belongs to another user",
       },
-      403,
+      404,
     );
   }
 

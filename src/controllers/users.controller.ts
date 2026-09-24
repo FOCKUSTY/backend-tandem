@@ -24,6 +24,21 @@ export const linkPartner = async (context: Context) => {
   const user = context.get("user");
   const { partnerUsername } = await context.req.json();
 
+  if (!partnerUsername || typeof partnerUsername !== "string") {
+    return context.json({ message: "partnerUsername is required" }, 400);
+  }
+
+  const currentUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { id: true, pairId: true },
+  });
+  if (!currentUser) {
+    return context.json({ message: "User not found" }, 404);
+  }
+  if (currentUser.pairId) {
+    return context.json({ message: "Вы уже привязаны к партнёру" }, 400);
+  }
+
   const partner = await prisma.user.findUnique({
     where: { username: partnerUsername },
     include: {
@@ -31,27 +46,30 @@ export const linkPartner = async (context: Context) => {
     },
   });
   if (!partner) return context.json({ message: "User not found" }, 404);
+  if (partner.id === currentUser.id) {
+    return context.json({ message: "Нельзя привязаться к самому себе" }, 400);
+  }
   if (partner.pair) {
     return context.json({ message: "Partner already linked" }, 400);
   }
 
-  const pair = await prisma.pair.create({
-    data: {
-      userAId: user.id,
-      userBId: partner.id,
-    },
-  });
-
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: user.id },
-      data: { pairId: pair.id },
-    }),
-    prisma.user.update({
+  const pair = await prisma.$transaction(async (tx) => {
+    const created = await tx.pair.create({
+      data: {
+        userAId: currentUser.id,
+        userBId: partner.id,
+      },
+    });
+    await tx.user.update({
+      where: { id: currentUser.id },
+      data: { pairId: created.id },
+    });
+    await tx.user.update({
       where: { id: partner.id },
-      data: { pairId: pair.id },
-    }),
-  ]);
+      data: { pairId: created.id },
+    });
+    return created;
+  });
 
   await ensureSystemSections(pair.id);
 
