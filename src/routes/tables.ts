@@ -22,6 +22,7 @@ import {
   updateCell,
   createOrUpdateCell,
   getCellsForTable,
+  duplicateTable,
 } from "../controllers/tables.controller.js";
 
 const tables = new Hono();
@@ -33,6 +34,8 @@ tables.post("/sections", createTableSection);
 tables.patch("/sections/:id", updateTableSection);
 tables.delete("/sections/:id", deleteTableSection);
 tables.post("/sections/reorder", reorderTableSections);
+
+tables.post("/:id/duplicate", duplicateTable);
 
 tables.get("/", getTables);
 tables.get("/:id", getTable);

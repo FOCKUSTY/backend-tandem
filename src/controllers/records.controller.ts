@@ -303,3 +303,44 @@ export const deleteRecord = async (context: Context) => {
   await prisma.record.delete({ where: { id } });
   return context.json({ message: "Deleted" });
 };
+
+export const duplicateRecord = async (context: Context) => {
+  const user = context.get("user");
+  const id = context.req.param("id")!;
+
+  const original = await prisma.record.findUnique({
+    where: { id },
+    include: { section: true },
+  });
+  if (!original) {
+    return context.json({ message: "Запись не найдена" }, 404);
+  }
+
+  const userIds = await getUserIdsInPair(user.id);
+  if (!userIds.includes(original.userId)) {
+    return context.json({ message: "Доступ запрещён" }, 403);
+  }
+
+  const body = await context.req.json().catch(() => ({}));
+  const { title } = body ?? {};
+
+  const copy = await prisma.record.create({
+    data: {
+      userId: user.id,
+      sectionId: original.sectionId,
+      title: title ?? original.title,
+      content: original.content,
+      dateEvent: original.dateEvent,
+      isCompleted: false,
+      isPinned: false,
+      isRecurring: original.isRecurring,
+      recurringInterval: original.recurringInterval,
+      isReport: original.isReport,
+      tags: original.tags,
+      metadata: {},
+    },
+    include: { section: { select: { id: true, name: true, slug: true } } },
+  });
+
+  return context.json(copy, 201);
+};

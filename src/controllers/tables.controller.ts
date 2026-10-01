@@ -850,3 +850,109 @@ export const getCellsForTable = async (context: Context) => {
   });
   return context.json(rows);
 };
+
+export const duplicateTable = async (context: Context) => {
+  const user = context.get("user");
+  const id = context.req.param("id")!;
+
+  const original = await prisma.table.findUnique({
+    where: { id },
+    include: {
+      section: true,
+      fields: { orderBy: { order: "asc" } },
+      rows: {
+        orderBy: { order: "asc" },
+        include: { cells: true },
+      },
+    },
+  });
+  if (!original) {
+    return context.json({ message: "Таблица не найдена" }, 404);
+  }
+
+  const pairId = await getPairId(user.id);
+  if (original.section.pairId !== pairId) {
+    return context.json({ message: "Доступ запрещён" }, 403);
+  }
+
+  const body = await context.req.json().catch(() => ({}));
+  const { name, sectionId } = body ?? {};
+
+  let targetSectionId = original.sectionId;
+  if (sectionId) {
+    const targetSection = await prisma.tableSection.findUnique({
+      where: { id: sectionId },
+    });
+    if (!targetSection || targetSection.pairId !== pairId) {
+      return context.json({ message: "Секция не найдена" }, 404);
+    }
+    targetSectionId = sectionId;
+  }
+
+  const maxOrder = await prisma.table.aggregate({
+    where: { sectionId: targetSectionId },
+    _max: { order: true },
+  });
+  const finalOrder = (maxOrder._max.order ?? -1) + 1;
+
+  const result = await prisma.$transaction(async (tx) => {
+    const newTable = await tx.table.create({
+      data: {
+        sectionId: targetSectionId,
+        name: name?.trim() || `${original.name} (копия)`,
+        description: original.description,
+        order: finalOrder,
+      },
+    });
+
+    const fieldIdMap = new Map<string, string>();
+    for (let i = 0; i < original.fields.length; i++) {
+      const f = original.fields[i];
+      const created = await tx.field.create({
+        data: {
+          tableId: newTable.id,
+          name: f.name,
+          type: f.type,
+          required: f.required,
+          options: f.options,
+          defaultValue: f.defaultValue,
+          order: i,
+        },
+      });
+      fieldIdMap.set(f.id, created.id);
+    }
+
+    for (let i = 0; i < original.rows.length; i++) {
+      const r = original.rows[i];
+      const newRow = await tx.row.create({
+        data: {
+          tableId: newTable.id,
+          order: i,
+        },
+      });
+
+      const cellData = r.cells
+        .map((c) => {
+          const newFieldId = fieldIdMap.get(c.fieldId);
+          if (!newFieldId) return null;
+          return {
+            rowId: newRow.id,
+            fieldId: newFieldId,
+            value: c.value,
+          };
+        })
+        .filter(
+          (c): c is { rowId: string; fieldId: string; value: string } =>
+            c !== null,
+        );
+
+      if (cellData.length > 0) {
+        await tx.cell.createMany({ data: cellData });
+      }
+    }
+
+    return newTable;
+  });
+
+  return context.json(result, 201);
+};

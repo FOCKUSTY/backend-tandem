@@ -7,6 +7,7 @@ import {
   updateRecord,
   deleteRecord,
   getRecordById,
+  duplicateRecord,
 } from "../controllers/records.controller.js";
 import {
   addStarred,
@@ -22,6 +23,7 @@ records.get("/", getRecords);
 records.get("/updates", getUpdates);
 records.get("/starred", getStarred);
 records.get("/:id", getRecordById);
+records.post("/:id/duplicate", duplicateRecord);
 
 records.post("/", createRecord);
 records.post("/starred", addStarred);
