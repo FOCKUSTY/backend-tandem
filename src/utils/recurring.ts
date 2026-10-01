@@ -1,3 +1,9 @@
+import { RRule, rrulestr } from "rrule";
+
+export function isRRule(interval: string): boolean {
+  return interval.trim().toUpperCase().startsWith("RRULE:");
+}
+
 export function parseInterval(
   interval: string,
 ): { value: number; unit: "h" | "d" | "m" | "y" } | null {
@@ -19,12 +25,16 @@ function intervalToMinutes(value: number, unit: "h" | "d" | "m" | "y"): number {
       return value * 30 * 24 * 60;
     case "y":
       return value * 365 * 24 * 60;
-    default:
-      return 0;
   }
 }
 
-export function validateInterval(interval: string): boolean {
+export function validateRecurrence(interval: string): boolean {
+  if (!interval || interval.trim().length === 0) return false;
+  if (isRRule(interval)) return validateRRule(interval);
+  return validateSimpleInterval(interval);
+}
+
+function validateSimpleInterval(interval: string): boolean {
   const parsed = parseInterval(interval);
   if (!parsed) return false;
   const minutes = intervalToMinutes(parsed.value, parsed.unit);
@@ -34,17 +44,60 @@ export function validateInterval(interval: string): boolean {
   return true;
 }
 
+function validateRRule(rule: string): boolean {
+  try {
+    const parsed = rrulestr(rule, { forceset: false });
+    const opts = parsed.options;
+
+    if (opts.freq === undefined || opts.freq === null) return false;
+    if (opts.freq > RRule.HOURLY) return false;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const MAX_ITERATIONS = 5000;
+
 export function getNextRecurringDate(dateEvent: Date, interval: string): Date {
+  const now = new Date();
+
+  if (isRRule(interval)) {
+    return getNextByRRule(dateEvent, interval, now);
+  }
+
+  return getNextBySimpleInterval(dateEvent, interval, now);
+}
+
+function getNextByRRule(dateEvent: Date, ruleStr: string, now: Date): Date {
+  try {
+    const rule = rrulestr(ruleStr, { dtstart: dateEvent });
+
+    if (dateEvent >= now) return dateEvent;
+
+    const next = rule.after(now, false);
+    return next ?? dateEvent;
+  } catch {
+    return dateEvent;
+  }
+}
+
+function getNextBySimpleInterval(
+  dateEvent: Date,
+  interval: string,
+  now: Date,
+): Date {
   const parsed = parseInterval(interval);
   if (!parsed) return dateEvent;
 
-  const now = new Date();
   let next = new Date(dateEvent);
-
   if (next >= now) return next;
 
   const { value, unit } = parsed;
-  while (next < now) {
+  let iterations = 0;
+
+  while (next < now && iterations < MAX_ITERATIONS) {
     switch (unit) {
       case "h":
         next.setHours(next.getHours() + value);
@@ -59,6 +112,7 @@ export function getNextRecurringDate(dateEvent: Date, interval: string): Date {
         next.setFullYear(next.getFullYear() + value);
         break;
     }
+    iterations++;
   }
   return next;
 }

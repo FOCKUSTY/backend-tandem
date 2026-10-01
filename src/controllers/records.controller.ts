@@ -1,6 +1,9 @@
 import { Context } from "hono";
 import prisma from "../prisma/index.js";
-import { getNextRecurringDate, validateInterval } from "../utils/recurring.js";
+import {
+  getNextRecurringDate,
+  validateRecurrence,
+} from "../utils/recurring.js";
 
 async function getPairId(userId: string): Promise<string | null> {
   const user = await prisma.user.findUnique({
@@ -173,7 +176,7 @@ export const createRecord = async (context: Context) => {
   } = await context.req.json();
 
   if (isRecurring && recurringInterval) {
-    if (!validateInterval(recurringInterval)) {
+    if (!validateRecurrence(recurringInterval)) {
       return context.json({ message: "Некорректный интервал повторения" }, 400);
     }
   }
@@ -235,7 +238,7 @@ export const updateRecord = async (context: Context) => {
   } = await context.req.json();
 
   if (isRecurring && recurringInterval) {
-    if (!validateInterval(recurringInterval)) {
+    if (!validateRecurrence(recurringInterval)) {
       return context.json({ message: "Некорректный интервал повторения" }, 400);
     }
   }
