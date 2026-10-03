@@ -85,6 +85,7 @@ export const getMe = async (context: Context) => {
       id: true,
       username: true,
       name: true,
+      email: true,
       pairId: true,
       pair: {
         select: {
@@ -100,17 +101,17 @@ export const getMe = async (context: Context) => {
 };
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_.-]+$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const updateMe = async (context: Context) => {
   const user = context.get("user");
   const body = await context.req.json().catch(() => ({}));
-  const { name, username } = body ?? {};
-
-  if (name === undefined && username === undefined) {
+  const { name, username, email } = body ?? {};
+  if (name === undefined && username === undefined && email === undefined) {
     return context.json({ message: "Нечего обновлять" }, 400);
   }
 
-  const updateData: { name?: string; username?: string } = {};
+  const updateData: { name?: string; username?: string; email?: string } = {};
 
   if (name !== undefined) {
     if (typeof name !== "string") {
@@ -157,6 +158,24 @@ export const updateMe = async (context: Context) => {
     }
 
     updateData.username = trimmedUsername;
+  }
+
+  if (email !== undefined) {
+    if (typeof email !== "string") {
+      return context.json({ message: "Неверный формат email" }, 400);
+    }
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      return context.json({ message: "Некорректный email" }, 400);
+    }
+    const existingEmail = await prisma.user.findUnique({
+      where: { email: trimmedEmail },
+      select: { id: true },
+    });
+    if (existingEmail && existingEmail.id !== user.id) {
+      return context.json({ message: "Этот email уже используется" }, 409);
+    }
+    updateData.email = trimmedEmail;
   }
 
   const { password: _, ...me } = await prisma.user.update({

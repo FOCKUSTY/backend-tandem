@@ -32,6 +32,8 @@ result.json
 .cache
 *.tsbuildinfo
 
+backup/
+
 # IntelliJ based IDEs
 .idea
 
