@@ -1,9 +1,19 @@
 import { Context } from "hono";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
-import { sign } from "../jwt.js";
 import prisma from "../prisma/index.js";
 import { sendPasswordResetEmail } from "../utils/mailer.js";
+import { verifyAccessToken } from "../jwt.js";
+import {
+  createSession,
+  listSessions,
+  normalizeRememberChoice,
+  revokeAllSessions,
+  revokeOwnedSession,
+  revokeSessionByRefreshToken,
+  rotateRefreshToken,
+  sessionMetadataFrom,
+} from "../services/auth.service.js";
 
 export const SYSTEM_SECTIONS = [
   { name: "Правила", slug: "rules", order: 1 },
@@ -33,11 +43,31 @@ async function ensureSystemSections(pairId: string) {
 const USERNAME_REGEX = /^[a-zA-Z0-9_.-]+$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export const register = async (context: Context) => {
-  const body = await context.req.json().catch(() => ({}));
-  const { username, password, name, email } = body ?? {};
+/**
+ * `remember` — насколько "запомнить устройство": 30 | 60 | 90 | 120 дней
+ * либо `"forever"` для бессрочной сессии. По умолчанию 90 дней.
+ */
+const readRemember = (body: Record<string, unknown>) =>
+  normalizeRememberChoice(
+    body.remember ?? body.rememberDays ?? body.rememberMe,
+  );
 
-  if (!username || typeof username !== "string") {
+const readBody = async (context: Context) => {
+  const body = await context.req.json().catch(() => ({}));
+  return (body ?? {}) as Record<string, unknown>;
+};
+
+const readString = (value: unknown) =>
+  typeof value === "string" ? value : undefined;
+
+export const register = async (context: Context) => {
+  const body = await readBody(context);
+  const username = readString(body.username);
+  const password = readString(body.password);
+  const name = readString(body.name);
+  const email = readString(body.email);
+
+  if (!username) {
     return context.json({ message: "Укажите имя пользователя" }, 400);
   }
   const trimmedUsername = username.trim();
@@ -55,7 +85,7 @@ export const register = async (context: Context) => {
     );
   }
 
-  if (!name || typeof name !== "string") {
+  if (!name) {
     return context.json({ message: "Укажите ваше имя" }, 400);
   }
   const trimmedName = name.trim();
@@ -66,7 +96,7 @@ export const register = async (context: Context) => {
     );
   }
 
-  if (!email || typeof email !== "string") {
+  if (!email) {
     return context.json({ message: "Укажите email" }, 400);
   }
   const trimmedEmail = email.trim().toLowerCase();
@@ -74,7 +104,7 @@ export const register = async (context: Context) => {
     return context.json({ message: "Некорректный email" }, 400);
   }
 
-  if (!password || typeof password !== "string") {
+  if (!password) {
     return context.json({ message: "Укажите пароль" }, 400);
   }
   if (password.length < 6 || password.length > 128) {
@@ -111,12 +141,22 @@ export const register = async (context: Context) => {
     select: { id: true, username: true, name: true, email: true },
   });
 
-  const token = sign({ id: user.id, username: user.username });
-  return context.json({ token, user }, 201);
+  const auth = await createSession(
+    user,
+    sessionMetadataFrom(context, body),
+    readRemember(body),
+  );
+  return context.json(auth, 201);
 };
 
 export const login = async (context: Context) => {
-  const { username, password } = await context.req.json();
+  const body = await readBody(context);
+  const username = readString(body.username)?.trim();
+  const password = readString(body.password);
+  if (!username || !password) {
+    return context.json({ message: "Укажите логин и пароль" }, 400);
+  }
+
   const user = await prisma.user.findUnique({ where: { username } });
   if (!user) return context.json({ message: "Invalid credentials" }, 401);
   const valid = await bcrypt.compare(password, user.password);
@@ -126,21 +166,133 @@ export const login = async (context: Context) => {
     await ensureSystemSections(user.pairId);
   }
 
-  const token = sign({ id: user.id, username: user.username });
-  return context.json({
-    token,
-    user: {
+  const auth = await createSession(
+    {
       id: user.id,
       username: user.username,
       name: user.name,
       email: user.email,
     },
+    sessionMetadataFrom(context, body),
+    readRemember(body),
+  );
+
+  return context.json(auth);
+};
+
+/**
+ * Обмен refresh-токена на новую пару. Ротация: старый токен становится
+ * недействительным, повторная попытка его использовать отзывает всю сессию.
+ */
+export const refresh = async (context: Context) => {
+  const body = await readBody(context);
+  const refreshToken = readString(body.refreshToken);
+  if (!refreshToken) {
+    return context.json({ message: "Укажите refreshToken" }, 400);
+  }
+
+  const result = await rotateRefreshToken(
+    refreshToken,
+    sessionMetadataFrom(context, body),
+  );
+
+  if (result.status === "invalid") {
+    return context.json(
+      {
+        message: "Недействительный refresh-токен",
+        code: "INVALID_REFRESH_TOKEN",
+      },
+      401,
+    );
+  }
+
+  if (result.status === "reuse") {
+    return context.json(
+      {
+        message:
+          "Refresh-токен уже был использован. Все сессии отозваны, войдите заново.",
+        code: "REFRESH_TOKEN_REUSED",
+      },
+      401,
+    );
+  }
+
+  return context.json(result.auth);
+};
+
+/** Отзывает текущую сессию по её refresh-токену. */
+export const logout = async (context: Context) => {
+  const body = await readBody(context);
+  const refreshToken = readString(body.refreshToken);
+  if (!refreshToken) {
+    return context.json({ message: "Укажите refreshToken" }, 400);
+  }
+
+  await revokeSessionByRefreshToken(refreshToken, "logout");
+  return context.json({ message: "Вы вышли из аккаунта" });
+};
+
+/** Отзывает все сессии пользователя (нужен access-токен). */
+export const logoutAll = async (context: Context) => {
+  const user = context.get("user");
+  await revokeAllSessions(user.id, "logout_all");
+  return context.json({ message: "Все сессии отозваны" });
+};
+
+export const sessions = async (context: Context) => {
+  const user = context.get("user");
+  const list = await listSessions(user.id);
+  return context.json({ sessions: list });
+};
+
+export const revokeSession = async (context: Context) => {
+  const user = context.get("user");
+  const sessionId = context.req.param("id");
+  if (!sessionId) {
+    return context.json({ message: "Укажите id сессии" }, 400);
+  }
+
+  const revoked = await revokeOwnedSession(
+    sessionId,
+    user.id,
+    "revoked_by_user",
+  );
+  if (!revoked) {
+    return context.json({ message: "Сессия не найдена" }, 404);
+  }
+
+  return context.json({ message: "Сессия отозвана" });
+};
+
+/**
+ * Сообщает, жив ли access-токен, — по телу запроса или по заголовку
+ * Authorization.
+ */
+export const introspect = async (context: Context) => {
+  const body = await readBody(context);
+  const header = context.req.header("Authorization");
+  const token =
+    readString(body.accessToken) ??
+    (header?.startsWith("Bearer ") ? header.slice(7) : undefined);
+  if (!token) {
+    return context.json({ active: false });
+  }
+
+  const decoded = verifyAccessToken(token);
+  if (!decoded) {
+    return context.json({ active: false });
+  }
+
+  return context.json({
+    active: true,
+    user: { id: decoded.id, username: decoded.username },
   });
 };
 
 export const forgotPassword = async (context: Context) => {
-  const { email } = await context.req.json();
-  if (!email || typeof email !== "string") {
+  const body = await readBody(context);
+  const email = readString(body.email);
+  if (!email) {
     return context.json({ message: "Укажите email" }, 400);
   }
   const trimmedEmail = email.trim().toLowerCase();
@@ -180,16 +332,13 @@ export const forgotPassword = async (context: Context) => {
 };
 
 export const resetPassword = async (context: Context) => {
-  const { token, newPassword } = await context.req.json();
-  if (!token || typeof token !== "string") {
+  const body = await readBody(context);
+  const token = readString(body.token);
+  const newPassword = readString(body.newPassword);
+  if (!token) {
     return context.json({ message: "Неверный токен" }, 400);
   }
-  if (
-    !newPassword ||
-    typeof newPassword !== "string" ||
-    newPassword.length < 6 ||
-    newPassword.length > 128
-  ) {
+  if (!newPassword || newPassword.length < 6 || newPassword.length > 128) {
     return context.json(
       { message: "Пароль должен содержать от 6 до 128 символов" },
       400,
@@ -217,6 +366,9 @@ export const resetPassword = async (context: Context) => {
       data: { used: true },
     }),
   ]);
+
+  // Пароль сменился — все выданные ранее токены больше не должны работать.
+  await revokeAllSessions(resetToken.userId, "password_reset");
 
   return context.json({ message: "Пароль успешно сброшен" });
 };

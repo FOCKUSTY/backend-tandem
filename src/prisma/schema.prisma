@@ -27,6 +27,47 @@ model User {
   devices          Device[]
   favoritesRecords UserFavoritesRecord[]
   passwordResetTokens PasswordResetToken[]
+  sessions         Session[]
+  refreshTokens    RefreshToken[]
+}
+
+model Session {
+  id          String    @id @default(uuid(7))
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId    String?
+  deviceName  String?
+  platform    String?
+  appVersion  String?
+  userAgent   String?
+  ip          String?
+  expiresAt   DateTime?
+  lastUsedAt  DateTime  @default(now())
+  revokedAt   DateTime?
+  revokedReason String?
+  createdAt   DateTime  @default(now())
+
+  tokens RefreshToken[]
+
+  @@index([userId])
+  @@index([userId, revokedAt])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid(7))
+  tokenHash String   @unique
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime?
+  usedAt    DateTime?
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([expiresAt])
 }
 
 model Device {

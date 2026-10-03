@@ -1,5 +1,5 @@
 import { MiddlewareHandler } from "hono";
-import { verify } from "../jwt.js";
+import { verifyAccessToken } from "../jwt.js";
 
 export const authMiddleware: MiddlewareHandler = async (context, next) => {
   console.log("Request:", context.req.method, context.req.path);
@@ -10,12 +10,15 @@ export const authMiddleware: MiddlewareHandler = async (context, next) => {
   }
 
   const token = authHeader.slice(7);
-  const decoded = verify(token);
+  const decoded = verifyAccessToken(token);
   if (!decoded) {
-    return context.json({ message: "Invalid or expired token" }, 401);
+    return context.json(
+      { message: "Invalid or expired token", code: "INVALID_ACCESS_TOKEN" },
+      401,
+    );
   }
 
-  context.set("user", decoded);
+  context.set("user", { id: decoded.id, username: decoded.username });
 
   await next();
 };

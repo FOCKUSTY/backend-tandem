@@ -2,6 +2,11 @@ import type { Context } from "hono";
 import bcrypt from "bcryptjs";
 import prisma from "../prisma/index.js";
 import { SYSTEM_SECTIONS } from "./auth.controller.js";
+import {
+  createSession,
+  revokeAllSessions,
+  sessionMetadataFrom,
+} from "../services/auth.service.js";
 
 async function ensureSystemSections(pairId: string) {
   const existing = await prisma.section.findMany({
@@ -218,7 +223,13 @@ export const changePassword = async (context: Context) => {
 
   const dbUser = await prisma.user.findUnique({
     where: { id: user.id },
-    select: { password: true },
+    select: {
+      id: true,
+      username: true,
+      name: true,
+      email: true,
+      password: true,
+    },
   });
   if (!dbUser) {
     return context.json({ message: "Пользователь не найден" }, 404);
@@ -235,5 +246,18 @@ export const changePassword = async (context: Context) => {
     data: { password: hash },
   });
 
-  return context.json({ success: true });
+  // Смена пароля — повод считать все выданные токены скомпрометированными.
+  // Текущее устройство получает новую пару, остальные сессии отзываются.
+  await revokeAllSessions(user.id, "password_change");
+  const auth = await createSession(
+    {
+      id: dbUser.id,
+      username: dbUser.username,
+      name: dbUser.name,
+      email: dbUser.email,
+    },
+    sessionMetadataFrom(context, (body ?? {}) as Record<string, unknown>),
+  );
+
+  return context.json({ success: true, ...auth });
 };
