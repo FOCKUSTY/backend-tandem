@@ -261,3 +261,113 @@ export const changePassword = async (context: Context) => {
 
   return context.json({ success: true, ...auth });
 };
+
+/**
+ * Полное удаление аккаунта по запросу пользователя (требование сторов).
+ *
+ * Требуется пароль: это необратимое действие, и мы хотим быть уверены,
+ * что его инициирует владелец, а не кто-то с разблокированным телефоном.
+ *
+ * Что делаем в одной транзакции:
+ *  - отвязываем обоих (у партнёра обнуляется pairId, его аккаунт жив);
+ *  - удаляем пару и все её общие секции/записи/таблицы;
+ *  - удаляем собственные записи, устройства и сессии пользователя;
+ *  - удаляем самого пользователя (каскадом уходят сессии, refresh-токены,
+ *    reset-токены, избранное).
+ */
+export const deleteMe = async (context: Context) => {
+  const user = context.get("user");
+  const body = await context.req.json().catch(() => ({}));
+  const { password } = (body ?? {}) as { password?: unknown };
+
+  if (!password || typeof password !== "string" || password.length === 0) {
+    return context.json(
+      { message: "Введите пароль для подтверждения" },
+      400,
+    );
+  }
+
+  const dbUser = await prisma.user.findUnique({
+    where: { id: user.id },
+    select: { id: true, password: true, pairId: true },
+  });
+  if (!dbUser) {
+    return context.json({ message: "Пользователь не найден" }, 404);
+  }
+
+  const isValid = await bcrypt.compare(password, dbUser.password);
+  if (!isValid) {
+    return context.json({ message: "Неверный пароль" }, 400);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (dbUser.pairId) {
+      const pair = await tx.pair.findUnique({ where: { id: dbUser.pairId } });
+      if (pair) {
+        const partnerId =
+          pair.userAId === user.id ? pair.userBId : pair.userAId;
+
+        // Отвязываем обоих — у партнёра аккаунт остаётся, но без пары.
+        await tx.user.updateMany({
+          where: { id: { in: [user.id, partnerId] } },
+          data: { pairId: null },
+        });
+
+        // Общие секции и их записи.
+        const sections = await tx.section.findMany({
+          where: { pairId: pair.id },
+          select: { id: true },
+        });
+        const sectionIds = sections.map((s) => s.id);
+        if (sectionIds.length > 0) {
+          await tx.record.deleteMany({
+            where: { sectionId: { in: sectionIds } },
+          });
+          await tx.section.deleteMany({ where: { id: { in: sectionIds } } });
+        }
+
+        // Общие таблицы и всё содержимое.
+        const tableSections = await tx.tableSection.findMany({
+          where: { pairId: pair.id },
+          select: { id: true },
+        });
+        const tsIds = tableSections.map((s) => s.id);
+        if (tsIds.length > 0) {
+          const tables = await tx.table.findMany({
+            where: { sectionId: { in: tsIds } },
+            select: { id: true },
+          });
+          const tableIds = tables.map((t) => t.id);
+          if (tableIds.length > 0) {
+            await tx.cell.deleteMany({
+              where: {
+                OR: [
+                  { row: { tableId: { in: tableIds } } },
+                  { field: { tableId: { in: tableIds } } },
+                ],
+              },
+            });
+            await tx.row.deleteMany({
+              where: { tableId: { in: tableIds } },
+            });
+            await tx.field.deleteMany({
+              where: { tableId: { in: tableIds } },
+            });
+            await tx.table.deleteMany({ where: { id: { in: tableIds } } });
+          }
+          await tx.tableSection.deleteMany({ where: { id: { in: tsIds } } });
+        }
+
+        await tx.pair.delete({ where: { id: pair.id } });
+      }
+    }
+
+    await tx.userFavoritesRecord.deleteMany({ where: { userId: user.id } });
+    await tx.record.deleteMany({ where: { userId: user.id } });
+    await tx.device.deleteMany({ where: { userId: user.id } });
+
+    await tx.user.delete({ where: { id: user.id } });
+  });
+
+  return context.json({ message: "Аккаунт удалён" });
+};

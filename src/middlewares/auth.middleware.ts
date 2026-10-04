@@ -2,8 +2,6 @@ import { MiddlewareHandler } from "hono";
 import { verifyAccessToken } from "../jwt.js";
 
 export const authMiddleware: MiddlewareHandler = async (context, next) => {
-  console.log("Request:", context.req.method, context.req.path);
-
   const authHeader = context.req.header("Authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return context.json({ message: "Unauthorized" }, 401);
