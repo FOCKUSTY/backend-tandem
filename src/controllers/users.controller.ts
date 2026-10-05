@@ -281,10 +281,7 @@ export const deleteMe = async (context: Context) => {
   const { password } = (body ?? {}) as { password?: unknown };
 
   if (!password || typeof password !== "string" || password.length === 0) {
-    return context.json(
-      { message: "Введите пароль для подтверждения" },
-      400,
-    );
+    return context.json({ message: "Введите пароль для подтверждения" }, 400);
   }
 
   const dbUser = await prisma.user.findUnique({

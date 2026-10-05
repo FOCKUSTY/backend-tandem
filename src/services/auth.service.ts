@@ -62,6 +62,17 @@ const MAX_REMEMBER_DAYS = 365 * 5;
 /** Не больше стольких активных сессий у пользователя — старые отзываются. */
 const MAX_ACTIVE_SESSIONS = 20;
 
+/**
+ * Сколько времени после «израсходования» refresh-токена повторный приход того
+ * же токена считаем сетевым ретраем, а не кражей.
+ *
+ * Клиент может не получить ответ на `/auth/refresh` (таймаут, плохая сеть),
+ * тогда он повторит запрос с тем же refresh-токеном. На сервере он уже помечен
+ * как использованный — без grace-окна это выглядит как reuse, и мы отзываем
+ * всю сессию, выбрасывая пользователя из аккаунта на ровном месте.
+ */
+const REFRESH_REUSE_GRACE_MS = 60_000;
+
 export const normalizeRememberChoice = (value: unknown): RememberChoice => {
   if (value === "forever" || value === "infinite" || value === "never") {
     return "forever";
@@ -247,11 +258,36 @@ export const rotateRefreshToken = async (
     include: { session: true },
   });
 
-  // Токена нет в БД: подделка, отозванный или вычищенный токен.
   if (!stored) return { status: "invalid" };
 
-  // Повторное использование уже отданного токена — компрометация сессии.
   if (stored.usedAt) {
+    const sinceUsedMs = now.getTime() - stored.usedAt.getTime();
+    if (sinceUsedMs < REFRESH_REUSE_GRACE_MS) {
+      const user = await prisma.user.findUnique({
+        where: { id: stored.userId },
+        select: { id: true, username: true, name: true, email: true },
+      });
+      if (!user) return { status: "invalid" };
+
+      const nextToken = createRefreshToken();
+      const nextExpiresAt =
+        stored.session.expiresAt ?? stored.expiresAt ?? null;
+
+      await prisma.refreshToken.create({
+        data: {
+          tokenHash: hashToken(nextToken),
+          sessionId: stored.sessionId,
+          userId: user.id,
+          expiresAt: nextExpiresAt,
+        },
+      });
+
+      return {
+        status: "ok",
+        auth: buildPayload(user, stored.sessionId, nextToken, nextExpiresAt),
+      };
+    }
+
     await revokeSession(stored.sessionId, "refresh_token_reuse");
     return { status: "reuse", sessionId: stored.sessionId };
   }
@@ -276,8 +312,6 @@ export const rotateRefreshToken = async (
 
   try {
     const [, next] = await prisma.$transaction([
-      // where с usedAt: null — защита от гонки: два параллельных refresh
-      // не смогут оба пометить один токен использованным.
       prisma.refreshToken.update({
         where: { id: stored.id, usedAt: null },
         data: { usedAt: now },
@@ -306,9 +340,6 @@ export const rotateRefreshToken = async (
       auth: buildPayload(user, session.id, nextToken, next.expiresAt ?? null),
     };
   } catch (error) {
-    // Ошибка обновления может значить две разные вещи, и путать их нельзя:
-    //  - токен уже израсходован параллельным запросом → переиспользование;
-    //  - сбой БД → это не повод разлогинивать пользователя.
     const consumed = await prisma.refreshToken.findUnique({
       where: { id: stored.id },
       select: { usedAt: true },
