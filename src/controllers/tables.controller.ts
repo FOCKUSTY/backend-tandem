@@ -1,6 +1,20 @@
 import { Context } from "hono";
 import prisma from "../prisma/index.js";
 
+/**
+ * Допустимые типы поля и ячейки. `cell.cellType` — строка из этого списка
+ * или null. `null`/`undefined` = использовать тип поля.
+ */
+const FIELD_TYPES = [
+  "text",
+  "number",
+  "date",
+  "boolean",
+  "select",
+  "multiline",
+] as const;
+type FieldTypeValue = (typeof FIELD_TYPES)[number];
+
 async function getPairId(userId: string): Promise<string | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -47,6 +61,21 @@ async function applyOrder(
       model.update({ where: { id }, data: { order: index } }),
     ),
   );
+}
+
+/**
+ * Превращает пользовательскую позицию в 0-based индекс вставки.
+ *
+ *   position > 0: 1 → 0, 2 → 1, ..., N+1 → N (за границей — в конец)
+ *   position < 0: -1 → N (последняя позиция), -2 → N-1, ..., -N → 0
+ *   position = 0: невалидно (обрабатывается выше)
+ *
+ * Индекс всегда clamp'ится в [0, total].
+ */
+function normalizeInsertIndex(position: number, total: number): number {
+  if (position > 0) return Math.min(position - 1, total);
+  // Отрицательная позиция: считаем от конца. total+1 — «после последней».
+  return Math.max(total + 1 + position, 0);
 }
 
 export const getTableSections = async (context: Context) => {
@@ -279,6 +308,13 @@ export const getTable = async (context: Context) => {
       },
       {} as Record<string, string>,
     ),
+    cellTypes: row.cells.reduce(
+      (acc, cell) => {
+        if (cell.cellType) acc[cell.fieldId] = cell.cellType;
+        return acc;
+      },
+      {} as Record<string, string>,
+    ),
   }));
 
   return context.json({
@@ -453,17 +489,9 @@ export const createField = async (context: Context) => {
   if (!type) {
     return context.json({ message: "Тип поля обязателен" }, 400);
   }
-  const validTypes = [
-    "text",
-    "number",
-    "date",
-    "boolean",
-    "select",
-    "multiline",
-  ];
-  if (!validTypes.includes(type)) {
+  if (!FIELD_TYPES.includes(type)) {
     return context.json(
-      { message: `Недопустимый тип. Допустимые: ${validTypes.join(", ")}` },
+      { message: `Недопустимый тип. Допустимые: ${FIELD_TYPES.join(", ")}` },
       400,
     );
   }
@@ -485,7 +513,6 @@ export const createField = async (context: Context) => {
     return context.json({ message: "Доступ запрещён" }, 403);
   }
 
-  // Проверяем уникальность имени в таблице
   const existing = await prisma.field.findFirst({
     where: { tableId, name: name.trim() },
   });
@@ -533,10 +560,7 @@ export const updateField = async (context: Context) => {
     return context.json({ message: "Доступ запрещён" }, 403);
   }
 
-  if (
-    type &&
-    !["text", "number", "date", "boolean", "select", "multiline"].includes(type)
-  ) {
+  if (type && !FIELD_TYPES.includes(type)) {
     return context.json({ message: "Недопустимый тип" }, 400);
   }
   if (type === "select" && options && options.length === 0) {
@@ -632,7 +656,11 @@ export const reorderFields = async (context: Context) => {
 export const createRow = async (context: Context) => {
   const user = context.get("user");
   const tableId = context.req.param("tableId")!;
-  const { order } = await context.req.json();
+  const body = await context.req.json().catch(() => ({}));
+  const { order, position } = (body ?? {}) as {
+    order?: unknown;
+    position?: unknown;
+  };
 
   const table = await prisma.table.findUnique({
     where: { id: tableId },
@@ -645,22 +673,51 @@ export const createRow = async (context: Context) => {
     return context.json({ message: "Доступ запрещён" }, 403);
   }
 
-  let finalOrder = order;
-  if (finalOrder === undefined) {
-    const maxOrder = await prisma.row.aggregate({
-      where: { tableId },
-      _max: { order: true },
-    });
-    finalOrder = (maxOrder._max.order ?? -1) + 1;
+  const existingRows = await prisma.row.findMany({
+    where: { tableId },
+    orderBy: { order: "asc" },
+    select: { id: true },
+  });
+  const total = existingRows.length;
+
+  let insertIndex = total;
+
+  if (position !== undefined) {
+    if (
+      typeof position !== "number" ||
+      !Number.isInteger(position) ||
+      position === 0
+    ) {
+      return context.json(
+        { message: "position должен быть целым ненулевым числом" },
+        400,
+      );
+    }
+    insertIndex = normalizeInsertIndex(position, total);
+  } else if (order !== undefined) {
+    if (typeof order !== "number" || !Number.isFinite(order) || order < 0) {
+      return context.json(
+        { message: "order должен быть неотрицательным" },
+        400,
+      );
+    }
+    insertIndex = Math.max(0, Math.min(Math.floor(order), total));
   }
 
-  const row = await prisma.row.create({
-    data: {
-      tableId,
-      order: finalOrder,
-    },
+  const newRow = await prisma.$transaction(async (tx) => {
+    const created = await tx.row.create({
+      data: { tableId, order: -(total + 1) },
+    });
+
+    const ids = existingRows.map((r) => r.id);
+    ids.splice(insertIndex, 0, created.id);
+
+    await applyOrder(tx, tx.row, ids);
+
+    return tx.row.findUniqueOrThrow({ where: { id: created.id } });
   });
-  return context.json(row, 201);
+
+  return context.json(newRow, 201);
 };
 
 export const deleteRow = async (context: Context) => {
@@ -713,15 +770,24 @@ export const reorderRows = async (context: Context) => {
     return context.json({ message: "Некоторые строки не найдены" }, 404);
   }
 
-  await prisma.$transaction((tx) => applyOrder(tx, tx.field, ids));
+  // ВАЖНО: здесь именно tx.row (раньше был tx.field).
+  await prisma.$transaction((tx) => applyOrder(tx, tx.row, ids));
 
   return context.json({ success: true });
 };
 
-function validateCellValue(value: string, field: any): boolean {
-  if (value === "" || value === null || value === undefined) return true;
+/** Формула в ячейке: её считает клиент, поэтому тип поля не проверяем. */
+const HAS_TEMPLATE_REGEX = /\{\{\s*[\s\S]*?\s*\}\}/;
 
-  switch (field.type) {
+function validateCellValue(
+  value: string,
+  type: FieldTypeValue,
+  options: string[],
+): boolean {
+  if (value === "" || value === null || value === undefined) return true;
+  if (HAS_TEMPLATE_REGEX.test(value)) return true;
+
+  switch (type) {
     case "text":
     case "multiline":
       return typeof value === "string";
@@ -732,16 +798,30 @@ function validateCellValue(value: string, field: any): boolean {
     case "boolean":
       return value === "true" || value === "false";
     case "select":
-      return field.options.includes(value);
+      return options.includes(value);
     default:
       return false;
   }
 }
 
+function readCellTypeOverride(
+  cellType: unknown,
+): { ok: true; value: FieldTypeValue | null | undefined } | { ok: false } {
+  if (cellType === undefined) return { ok: true, value: undefined };
+  if (cellType === null) return { ok: true, value: null };
+  if (
+    typeof cellType === "string" &&
+    (FIELD_TYPES as readonly string[]).includes(cellType)
+  ) {
+    return { ok: true, value: cellType as FieldTypeValue };
+  }
+  return { ok: false };
+}
+
 export const updateCell = async (context: Context) => {
   const user = context.get("user");
   const id = context.req.param("id");
-  const { value } = await context.req.json();
+  const { value, cellType } = await context.req.json();
 
   const cell = await prisma.cell.findUnique({
     where: { id },
@@ -757,9 +837,18 @@ export const updateCell = async (context: Context) => {
     return context.json({ message: "Доступ запрещён" }, 403);
   }
 
-  if (!validateCellValue(value, cell.field)) {
+  const override = readCellTypeOverride(cellType);
+  if (!override.ok) {
+    return context.json({ message: "Недопустимый тип ячейки" }, 400);
+  }
+
+  const nextCellType =
+    override.value === undefined ? cell.cellType : override.value;
+  const effectiveType = (nextCellType ?? cell.field.type) as FieldTypeValue;
+
+  if (!validateCellValue(value, effectiveType, cell.field.options)) {
     return context.json(
-      { message: `Некорректное значение для типа ${cell.field.type}` },
+      { message: `Некорректное значение для типа ${effectiveType}` },
       400,
     );
   }
@@ -771,16 +860,21 @@ export const updateCell = async (context: Context) => {
     return context.json({ message: "Поле обязательно для заполнения" }, 400);
   }
 
+  const updateData: { value: string; cellType?: string | null } = {
+    value: value ?? "",
+  };
+  if (override.value !== undefined) updateData.cellType = override.value;
+
   const updated = await prisma.cell.update({
     where: { id },
-    data: { value: value ?? "" },
+    data: updateData,
   });
   return context.json(updated);
 };
 
 export const createOrUpdateCell = async (context: Context) => {
   const user = context.get("user");
-  const { rowId, fieldId, value } = await context.req.json();
+  const { rowId, fieldId, value, cellType } = await context.req.json();
 
   if (!rowId || !fieldId) {
     return context.json({ message: "rowId и fieldId обязательны" }, 400);
@@ -806,23 +900,49 @@ export const createOrUpdateCell = async (context: Context) => {
     return context.json({ message: "Доступ запрещён" }, 403);
   }
 
-  if (!validateCellValue(value, field)) {
+  const override = readCellTypeOverride(cellType);
+  if (!override.ok) {
+    return context.json({ message: "Недопустимый тип ячейки" }, 400);
+  }
+
+  const existing = await prisma.cell.findUnique({
+    where: { rowId_fieldId: { rowId, fieldId } },
+    select: { cellType: true },
+  });
+  const nextCellType =
+    override.value === undefined
+      ? (existing?.cellType ?? null)
+      : override.value;
+  const effectiveType = (nextCellType ?? field.type) as FieldTypeValue;
+
+  if (!validateCellValue(value, effectiveType, field.options)) {
     return context.json(
-      { message: `Некорректное значение для типа ${field.type}` },
+      { message: `Некорректное значение для типа ${effectiveType}` },
       400,
     );
   }
 
+  const updateData: { value: string; cellType?: string | null } = {
+    value: value ?? "",
+  };
+  if (override.value !== undefined) updateData.cellType = override.value;
+
+  const createData: {
+    rowId: string;
+    fieldId: string;
+    value: string;
+    cellType?: string;
+  } = {
+    rowId,
+    fieldId,
+    value: value ?? "",
+  };
+  if (override.value) createData.cellType = override.value;
+
   const cell = await prisma.cell.upsert({
-    where: {
-      rowId_fieldId: { rowId, fieldId },
-    },
-    update: { value: value ?? "" },
-    create: {
-      rowId,
-      fieldId,
-      value: value ?? "",
-    },
+    where: { rowId_fieldId: { rowId, fieldId } },
+    update: updateData,
+    create: createData,
   });
 
   return context.json(cell);
@@ -935,15 +1055,28 @@ export const duplicateTable = async (context: Context) => {
         .map((c) => {
           const newFieldId = fieldIdMap.get(c.fieldId);
           if (!newFieldId) return null;
-          return {
+          const item: {
+            rowId: string;
+            fieldId: string;
+            value: string;
+            cellType?: string;
+          } = {
             rowId: newRow.id,
             fieldId: newFieldId,
             value: c.value,
           };
+          if (c.cellType) item.cellType = c.cellType;
+          return item;
         })
         .filter(
-          (c): c is { rowId: string; fieldId: string; value: string } =>
-            c !== null,
+          (
+            c,
+          ): c is {
+            rowId: string;
+            fieldId: string;
+            value: string;
+            cellType?: string;
+          } => c !== null,
         );
 
       if (cellData.length > 0) {
