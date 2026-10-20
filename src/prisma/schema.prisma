@@ -128,6 +128,7 @@ model Record {
   title             String?
   content           String?
   dateEvent         DateTime?
+  eventType         String?
   isCompleted       Boolean   @default(false)
   isPinned          Boolean   @default(false)
   tags              String[]  @default([])

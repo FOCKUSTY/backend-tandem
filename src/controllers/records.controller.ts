@@ -183,6 +183,7 @@ export const createRecord = async (context: Context) => {
     recurringInterval,
     isReport,
     locationName,
+    eventType,
   } = await context.req.json();
 
   if (isRecurring && recurringInterval) {
@@ -226,6 +227,7 @@ export const createRecord = async (context: Context) => {
       recurringInterval: isRecurring ? recurringInterval : null,
       isReport: isReport || false,
       locationName: normalizeLocationName(locationName),
+      eventType: eventType?.trim() || null,
     },
     include: { section: { select: { id: true, name: true, slug: true } } },
   });
@@ -247,6 +249,7 @@ export const updateRecord = async (context: Context) => {
     recurringInterval,
     isReport,
     locationName,
+    eventType,
   } = await context.req.json();
 
   if (isRecurring && recurringInterval) {
@@ -294,6 +297,7 @@ export const updateRecord = async (context: Context) => {
       recurringInterval: isRecurring ? recurringInterval : undefined,
       isReport: isReport !== undefined ? isReport : existing.isReport,
       locationName: normalizeLocationName(locationName),
+      eventType: eventType !== undefined ? eventType : existing.eventType,
     },
     include: { section: { select: { id: true, name: true, slug: true } } },
   });
