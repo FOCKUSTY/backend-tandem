@@ -140,6 +140,8 @@ model Record {
 
   favoriteBy UserFavoritesRecord[]
 
+  locationName    String?
+
   @@index([userId, sectionId])
   @@index([userId, sectionId, dateEvent])
   @@index([userId, dateEvent])

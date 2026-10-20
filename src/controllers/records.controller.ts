@@ -5,6 +5,15 @@ import {
   validateRecurrence,
 } from "../utils/recurring.js";
 
+const normalizeLocationName = (value: unknown): string | null | undefined => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 200);
+};
+
 async function getPairId(userId: string): Promise<string | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -173,6 +182,7 @@ export const createRecord = async (context: Context) => {
     isRecurring,
     recurringInterval,
     isReport,
+    locationName,
   } = await context.req.json();
 
   if (isRecurring && recurringInterval) {
@@ -215,6 +225,7 @@ export const createRecord = async (context: Context) => {
       isRecurring: isRecurring || false,
       recurringInterval: isRecurring ? recurringInterval : null,
       isReport: isReport || false,
+      locationName: normalizeLocationName(locationName),
     },
     include: { section: { select: { id: true, name: true, slug: true } } },
   });
@@ -235,6 +246,7 @@ export const updateRecord = async (context: Context) => {
     isRecurring,
     recurringInterval,
     isReport,
+    locationName,
   } = await context.req.json();
 
   if (isRecurring && recurringInterval) {
@@ -281,6 +293,7 @@ export const updateRecord = async (context: Context) => {
         isRecurring !== undefined ? isRecurring : existing.isRecurring,
       recurringInterval: isRecurring ? recurringInterval : undefined,
       isReport: isReport !== undefined ? isReport : existing.isReport,
+      locationName: normalizeLocationName(locationName),
     },
     include: { section: { select: { id: true, name: true, slug: true } } },
   });
